@@ -87,20 +87,30 @@ class FlowComposerAgent:
     
     def __init__(self):
         load_dotenv()
-        embedding_model = CohereEmbeddings(
+        self.embedding_model = CohereEmbeddings(
             model="embed-english-v3.0",
             cohere_api_key=os.getenv("cohere_api_key")
         )
         
-        loader = DocumentLoader(self.URLS)
-        docs = loader.scrape_webpages()
-        
-        kb = KnowledgeBase(
-            embedding_model, 
-            faiss_path="faiss_index", 
-            cohere_key=os.getenv("cohere_api_key")
-        )
-        self.retriever = kb.build_index(docs)
+        # Check if FAISS index exists
+        if not os.path.exists("faiss_index"):
+            loader = DocumentLoader(self.URLS)
+            docs = loader.scrape_webpages()
+            
+            kb = KnowledgeBase(
+                self.embedding_model, 
+                faiss_path="faiss_index", 
+                cohere_key=os.getenv("cohere_api_key")
+            )
+            self.retriever = kb.build_index(docs)
+        else:
+            # Load existing index with same embedding model
+            vectorstore = FAISS.load_local("faiss_index", self.embedding_model, allow_dangerous_deserialization=True)
+            compressor = CohereRerank(cohere_api_key=os.getenv("cohere_api_key"), top_n=5)
+            self.retriever = ContextualCompressionRetriever(
+                base_compressor=compressor,
+                base_retriever=vectorstore.as_retriever()
+            )
         
         self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         self.model = "claude-3-sonnet-20240229"

@@ -107,7 +107,7 @@ The JSON should represent the following planning details:
 {plan_text}
 
 Requirements:
-- Each node must have a unique "id", a "type" chosen from the available types (greeting, choice, input, link, inquiry), a "position" with x and y coordinates (spread evenly for clarity), and "data" including at least a "label".
+- Each node must have a unique "id", a "type" chosen from the available types (greeting, choice, input, link, inquiry), a "position" with x and y coordinates (spread evenly for clarity), and "data" including at least a "label" and a "style" as shown in the template previously.
 - Each edge must have a unique "id", a "source" (the id of the starting node), a "target" (the id of the ending node), and a "label" describing the transition (e.g., conditions).
 - The flow should be well-structured, visually appealing, and informative.
 - Output with just the valid JSON.

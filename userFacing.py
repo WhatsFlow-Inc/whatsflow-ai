@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from anthropic import Anthropic
 from wapFlowComposer import FlowComposerAgent
 from reactFlowComposer import ReactFlowComposerAgent
+import json
 
 # Load environment variables
 load_dotenv()
@@ -48,6 +49,7 @@ class UserSession:
     def __init__(self):
         self.system_prompt = USER_FACING_SYSTEM_PROMPT
         self.messages = []  # Remove system message from messages array
+        self.plan = None  # Initialize plan attribute
     
     def add_message(self, role, content):
         self.messages.append({"role": role, "content": content})
@@ -156,13 +158,19 @@ async def get_plan(thread_id: str):
     return PlanResponse(flow_plan=session.plan)
 
 @app.post("/get_flows", response_model=FlowsResponse)
-async def get_flows(thread_id: str):
-    session = session_store.get(thread_id)
+async def get_flows(request: FlowRequest):
+    session = session_store.get(request.thread_id)
     if not session:
         raise HTTPException(status_code=404, detail="No conversation found for this thread_id")
 
     wap_json_output = wap_flow_agent.compose_flow(session.plan)
     react_flow_output = react_flow_agent.compose_flow_json(session.plan)
+    
+    # Parse the JSON string from wap_json_output (removing markdown formatting if present)
+    if isinstance(wap_json_output, str):
+        # Remove markdown code block formatting if present
+        wap_json_output = wap_json_output.replace('```json\n', '').replace('\n```', '')
+        wap_json_output = json.loads(wap_json_output)
 
     return FlowsResponse(wap_json=wap_json_output, react_json=react_flow_output)
 
