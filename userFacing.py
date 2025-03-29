@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from anthropic import Anthropic
 from wapFlowComposer import FlowComposerAgent
 from reactFlowComposer import ReactFlowComposerAgent
+from editWapFlow import FlowTransformerAgent
 import json
 
 # Load environment variables
@@ -113,6 +114,12 @@ class FlowsResponse(BaseModel):
 class FlowRequest(BaseModel):
     thread_id: str
 
+class EditFlowRequest(BaseModel):
+    react_flow_json: Dict
+
+class EditFlowResponse(BaseModel):
+    wap_json: Dict
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     if not request.thread_id or not request.user_input:
@@ -173,6 +180,22 @@ async def get_flows(request: FlowRequest):
         wap_json_output = json.loads(wap_json_output)
 
     return FlowsResponse(wap_json=wap_json_output, react_json=react_flow_output)
+
+@app.post("/edit-wap-flow", response_model=EditFlowResponse)
+async def edit_wap_flow(request: EditFlowRequest):
+    # Initialize the FlowTransformerAgent
+    transformer = FlowTransformerAgent()
+    
+    # Transform React Flow JSON to WhatsApp Flow JSON
+    wap_json_output = transformer.transform_flow(request.react_flow_json)
+    
+    # Parse the JSON string (removing markdown formatting if present)
+    if isinstance(wap_json_output, str):
+        # Remove markdown code block formatting if present
+        wap_json_output = wap_json_output.replace('```json\n', '').replace('\n```', '')
+        wap_json_output = json.loads(wap_json_output)
+    
+    return EditFlowResponse(wap_json=wap_json_output)
 
 if __name__ == "__main__":
     import uvicorn
