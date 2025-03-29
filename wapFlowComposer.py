@@ -3,12 +3,13 @@ from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_cohere import CohereEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CohereRerank
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
+from anthropic import Anthropic
 
 load_dotenv()
 
@@ -86,9 +87,9 @@ class FlowComposerAgent:
     
     def __init__(self):
         load_dotenv()
-        embedding_model = OpenAIEmbeddings(
-            model="text-embedding-ada-002", 
-            api_key=os.getenv("OPENAI_API_KEY")
+        embedding_model = CohereEmbeddings(
+            model="embed-english-v3.0",
+            cohere_api_key=os.getenv("cohere_api_key")
         )
         
         loader = DocumentLoader(self.URLS)
@@ -101,19 +102,23 @@ class FlowComposerAgent:
         )
         self.retriever = kb.build_index(docs)
         
-        self.llm = ChatOpenAI(
-            model="gpt-4", 
-            temperature=0, 
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
+        self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.model = "claude-3-sonnet-20240229"
         self.prompt_template = PromptFactory.get_prompt()
 
     def compose_flow(self, user_query):
         docs = self.retriever.get_relevant_documents(user_query)
         context = "\n\n".join([d.page_content for d in docs])
         formatted_prompt = self.prompt_template.format(context=context, question=user_query)
-        response = self.llm.predict(formatted_prompt)
-        return response.strip()
+        
+        response = self.client.messages.create(
+            model=self.model,
+            messages=[{"role": "user", "content": formatted_prompt}],
+            system="You are a senior WhatsApp Flow Architect specializing in building production-ready Flow JSONs.",
+            max_tokens=4096,
+            temperature=0
+        )
+        return response.content[0].text.strip()
 
 
 # Main orchestration

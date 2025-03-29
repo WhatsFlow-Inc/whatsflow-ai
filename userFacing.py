@@ -3,13 +3,13 @@ from pydantic import BaseModel
 from typing import Optional, Dict
 import os
 from dotenv import load_dotenv
-import openai
+from anthropic import Anthropic
 from wapFlowComposer import FlowComposerAgent
 from reactFlowComposer import ReactFlowComposerAgent
 
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 app = FastAPI()
 
@@ -46,8 +46,8 @@ session_store = {}
 
 class UserSession:
     def __init__(self):
-        self.messages = [{"role": "system", "content": USER_FACING_SYSTEM_PROMPT}]
-        self.plan = ""
+        self.system_prompt = USER_FACING_SYSTEM_PROMPT
+        self.messages = []  # Remove system message from messages array
     
     def add_message(self, role, content):
         self.messages.append({"role": role, "content": content})
@@ -57,28 +57,30 @@ class UserSession:
 
 def agent_respond(user_input, session: UserSession):
     session.add_message("user", user_input)
-    response = openai.chat.completions.create(
-        model="gpt-4",
+    response = anthropic.messages.create(
+        model="claude-3-sonnet-20240229",
         messages=session.get_messages(),
+        system=session.system_prompt,  # Add system prompt as separate parameter
+        max_tokens=1024,
         temperature=0.7,
     )
-    agent_reply = response.choices[0].message.content.strip()
+    agent_reply = response.content[0].text
     session.add_message("assistant", agent_reply)
     return agent_reply
 
 def planner_generate_flow(session: UserSession):
-    planner_messages = [
-        {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
-        {"role": "user", "content": f"Here is the conversation history:\n{format_conversation(session.get_messages())}\nPlease generate the flow as per the instructions."}
-    ]
-    
-    response = openai.chat.completions.create(
-        model="gpt-4",
-        messages=planner_messages,
+    conversation_history = format_conversation(session.get_messages())
+    response = anthropic.messages.create(
+        model="claude-3-sonnet-20240229",
+        system=PLANNER_SYSTEM_PROMPT,  # Add system prompt as separate parameter
+        messages=[
+            {"role": "user", "content": f"Here is the conversation history:\n{conversation_history}\nPlease generate the flow as per the instructions."}
+        ],
+        max_tokens=1024,
         temperature=0.5,
     )
-    plan = response.choices[0].message.content.strip()
-    session.plan = plan  # Store the plan in the session
+    plan = response.content[0].text
+    session.plan = plan
     return plan
 
 def format_conversation(messages):
@@ -105,6 +107,9 @@ class PlanResponse(BaseModel):
 class FlowsResponse(BaseModel):
     wap_json: Dict
     react_json: Dict
+
+class FlowRequest(BaseModel):
+    thread_id: str
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
