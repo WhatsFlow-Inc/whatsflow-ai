@@ -10,8 +10,11 @@ from langchain.retrievers.document_compressors import CohereRerank
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from anthropic import Anthropic
+from openai import OpenAI
+import tiktoken
 
 load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 class DocumentLoader:
@@ -40,15 +43,14 @@ class KnowledgeBase:
         if os.path.exists(self.faiss_path):
             print("Loading existing FAISS index...")
             vectorstore = FAISS.load_local(self.faiss_path, self.embedding_model, allow_dangerous_deserialization=True)
-
         else:
             print("Creating new FAISS index...")
             vectorstore = FAISS.from_texts(chunks, self.embedding_model)
             vectorstore.save_local(self.faiss_path)
-        compressor = CohereRerank(cohere_api_key=self.cohere_key, top_n=5)
+        compressor = CohereRerank(cohere_api_key=self.cohere_key, top_n=3)
         retriever = ContextualCompressionRetriever(
             base_compressor=compressor,
-            base_retriever=vectorstore.as_retriever()
+            base_retriever=vectorstore.as_retriever(search_kwargs={"k": 4})
         )
         return retriever
 
@@ -71,8 +73,8 @@ class PromptFactory:
 
             Guidelines:
             - Only return the JSON output.
-            - Use placeholders like {{variable}} if the user input is missing.
             - Make the Flow dynamic where needed (e.g., dynamic buttons).
+            - Make sure you use all the required fields like title, example and type and stick to a single Flow version preferably .
 
             JSON:
             """
@@ -83,6 +85,10 @@ class FlowComposerAgent:
     URLS = [
         "https://developers.facebook.com/docs/whatsapp/flows/reference/flowjson",
         "https://developers.facebook.com/docs/whatsapp/flows/reference/components"
+        "https://developers.facebook.com/docs/whatsapp/flows/gettingstarted/pre-approved-loan",
+        "https://developers.facebook.com/docs/whatsapp/flows/gettingstarted/health-insurance",
+        "https://developers.facebook.com/docs/whatsapp/flows/gettingstarted/personalised-offer",
+        "https://developers.facebook.com/docs/whatsapp/flows/gettingstarted/purchase-intent"
     ]
     
     def __init__(self):
@@ -106,29 +112,33 @@ class FlowComposerAgent:
         else:
             # Load existing index with same embedding model
             vectorstore = FAISS.load_local("faiss_index", self.embedding_model, allow_dangerous_deserialization=True)
-            compressor = CohereRerank(cohere_api_key=os.getenv("cohere_api_key"), top_n=5)
+            compressor = CohereRerank(cohere_api_key=os.getenv("cohere_api_key"), top_n=3)
             self.retriever = ContextualCompressionRetriever(
                 base_compressor=compressor,
-                base_retriever=vectorstore.as_retriever()
+                base_retriever=vectorstore.as_retriever(search_kwargs={"k": 4})
             )
         
-        self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        self.model = "claude-3-sonnet-20240229"
+        self.client = client
+        self.model = "gpt-4-turbo-preview"
         self.prompt_template = PromptFactory.get_prompt()
+        self.tokenizer = tiktoken.encoding_for_model("gpt-4")
 
     def compose_flow(self, user_query):
         docs = self.retriever.get_relevant_documents(user_query)
         context = "\n\n".join([d.page_content for d in docs])
+        
         formatted_prompt = self.prompt_template.format(context=context, question=user_query)
         
-        response = self.client.messages.create(
+        response = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": formatted_prompt}],
-            system="You are a senior WhatsApp Flow Architect specializing in building production-ready Flow JSONs.",
-            max_tokens=4096,
+            messages=[
+                {"role": "system", "content": "You are a senior WhatsApp Flow Architect specializing in building production-ready Flow JSONs."},
+                {"role": "user", "content": formatted_prompt}
+            ],
+            max_tokens=2048,
             temperature=0
         )
-        return response.content[0].text.strip()
+        return response.choices[0].message.content.strip()
 
 
 # Main orchestration

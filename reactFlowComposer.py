@@ -1,19 +1,19 @@
 import os
 import json
 from dotenv import load_dotenv
-from anthropic import Anthropic
+from openai import OpenAI
 
 load_dotenv()
-anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class ReactFlowComposerAgent:
-    def __init__(self, model="claude-3-sonnet-20240229", temperature=0.5):
+    def __init__(self, model="gpt-4", temperature=0.5):
         """
         Initialize the agent with the specified model and temperature.
         """
         self.model = model
         self.temperature = temperature
-        self.client = anthropic
+        self.client = client
 
     def compose_flow_json(self, plan_text: str) -> dict:
         """
@@ -114,15 +114,17 @@ Requirements:
 
 Please just output valid JSON and no supporting text. ONLY JSON.
 """
-        response = self.client.messages.create(
+        response = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            system="You are a React Flow JSON generator.",
+            messages=[
+                {"role": "system", "content": "You are a React Flow JSON generator."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=4096,
             temperature=self.temperature,
         )
 
-        flow_json = response.content[0].text.strip()
+        flow_json = response.choices[0].message.content.strip()
         flow_json = json.loads(flow_json)
 
         return flow_json

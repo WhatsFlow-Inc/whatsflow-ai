@@ -3,17 +3,27 @@ from pydantic import BaseModel
 from typing import Optional, Dict
 import os
 from dotenv import load_dotenv
-from anthropic import Anthropic
+from openai import OpenAI
 from wapFlowComposer import FlowComposerAgent
 from reactFlowComposer import ReactFlowComposerAgent
 from editWapFlow import FlowTransformerAgent
 import json
+from fastapi.middleware.cors import CORSMiddleware
 
 # Load environment variables
 load_dotenv()
-anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 # System prompts
 USER_FACING_SYSTEM_PROMPT = """
@@ -60,29 +70,33 @@ class UserSession:
 
 def agent_respond(user_input, session: UserSession):
     session.add_message("user", user_input)
-    response = anthropic.messages.create(
-        model="claude-3-sonnet-20240229",
-        messages=session.get_messages(),
-        system=session.system_prompt,  # Add system prompt as separate parameter
+    
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": USER_FACING_SYSTEM_PROMPT}
+        ] + session.get_messages(),  # Ensure the system prompt is included
         max_tokens=1024,
         temperature=0.7,
     )
-    agent_reply = response.content[0].text
+    
+    agent_reply = response.choices[0].message.content
     session.add_message("assistant", agent_reply)
+    
     return agent_reply
 
 def planner_generate_flow(session: UserSession):
     conversation_history = format_conversation(session.get_messages())
-    response = anthropic.messages.create(
-        model="claude-3-sonnet-20240229",
-        system=PLANNER_SYSTEM_PROMPT,  # Add system prompt as separate parameter
+    response = client.chat.completions.create(
+        model="gpt-4",
         messages=[
+            {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
             {"role": "user", "content": f"Here is the conversation history:\n{conversation_history}\nPlease generate the flow as per the instructions."}
         ],
         max_tokens=1024,
         temperature=0.5,
     )
-    plan = response.content[0].text
+    plan = response.choices[0].message.content
     session.plan = plan
     return plan
 
@@ -116,6 +130,8 @@ class FlowRequest(BaseModel):
 
 class EditFlowRequest(BaseModel):
     react_flow_json: Dict
+    example_react_flow: Dict
+    example_whatsapp_flow: Dict
 
 class EditFlowResponse(BaseModel):
     wap_json: Dict
@@ -177,6 +193,7 @@ async def get_flows(request: FlowRequest):
     if isinstance(wap_json_output, str):
         # Remove markdown code block formatting if present
         wap_json_output = wap_json_output.replace('```json\n', '').replace('\n```', '')
+        # Parse the JSON string into a dictionary
         wap_json_output = json.loads(wap_json_output)
 
     return FlowsResponse(wap_json=wap_json_output, react_json=react_flow_output)
@@ -186,8 +203,12 @@ async def edit_wap_flow(request: EditFlowRequest):
     # Initialize the FlowTransformerAgent
     transformer = FlowTransformerAgent()
     
-    # Transform React Flow JSON to WhatsApp Flow JSON
-    wap_json_output = transformer.transform_flow(request.react_flow_json)
+    # Transform React Flow JSON to WhatsApp Flow JSON using examples
+    wap_json_output = transformer.transform_flow(
+        request.example_react_flow,
+        request.example_whatsapp_flow,
+        request.react_flow_json
+    )
     
     # Parse the JSON string (removing markdown formatting if present)
     if isinstance(wap_json_output, str):
@@ -195,8 +216,19 @@ async def edit_wap_flow(request: EditFlowRequest):
         wap_json_output = wap_json_output.replace('```json\n', '').replace('\n```', '')
         wap_json_output = json.loads(wap_json_output)
     
+    # If wap_json_output is a list, wrap it in a dictionary
+    if isinstance(wap_json_output, list):
+        wap_json_output = {"flow": wap_json_output}
+    
     return EditFlowResponse(wap_json=wap_json_output)
 
 if __name__ == "__main__":
     import uvicorn
+    from pyngrok import ngrok
+
+    # Open a ngrok tunnel to the HTTP server
+    public_url = ngrok.connect(5000).public_url
+    print(f"Public URL: {public_url}")
+
+    # Start the server
     uvicorn.run(app, host="0.0.0.0", port=5000)
